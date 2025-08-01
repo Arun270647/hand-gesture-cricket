@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import * as cameraUtils from '@mediapipe/camera_utils';
-import * as mpHands from '@mediapipe/hands';
+
+// Dynamic imports for MediaPipe to avoid Netlify issues
+let cameraUtils: any = null;
+let mpHands: any = null;
 
 interface HandGestureResult {
   fingerCount: number;
@@ -18,6 +20,7 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
   });
   const [isInitialized, setIsInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   const handsRef = useRef<any>(null);
 
   const countFingers = useCallback((results: any) => {
@@ -124,6 +127,14 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
 
   const initializeCamera = useCallback(async () => {
     try {
+      console.log(`Starting camera initialization (attempt ${retryCount + 1})...`);
+      
+      // Add delay for retries to avoid overwhelming the server
+      if (retryCount > 0) {
+        await new Promise(resolve => setTimeout(resolve, Math.min(1000 * Math.pow(2, retryCount), 10000)));
+      }
+      
+      // Request camera permissions
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { 
           width: { ideal: 640 },
@@ -132,52 +143,122 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
         }
       });
       
+      console.log('Camera stream obtained successfully');
+      
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        console.log('Video stream attached to video element');
         
-        await new Promise((resolve) => {
-          if(videoRef.current) videoRef.current.onloadedmetadata = () => resolve(true);
+        await new Promise((resolve, reject) => {
+          if (videoRef.current) {
+            videoRef.current.onloadedmetadata = () => {
+              console.log('Video metadata loaded');
+              resolve(true);
+            };
+            videoRef.current.onerror = reject;
+          }
         });
         
+        // Set canvas dimensions to match video
         if (canvasRef.current && videoRef.current) {
           const video = videoRef.current;
           canvasRef.current.width = video.videoWidth || 640;
           canvasRef.current.height = video.videoHeight || 480;
+          console.log(`Canvas dimensions set to: ${canvasRef.current.width}x${canvasRef.current.height}`);
         }
       }
       
+      // Initialize MediaPipe Hands with dynamic imports
+      console.log('Loading MediaPipe modules...');
+      
+      try {
+        // Dynamic imports to avoid Netlify issues
+        if (!mpHands) {
+          mpHands = await import('@mediapipe/hands');
+        }
+        if (!cameraUtils) {
+          cameraUtils = await import('@mediapipe/camera_utils');
+        }
+        
+        console.log('MediaPipe modules loaded successfully');
+      } catch (importError) {
+        console.error('Failed to load MediaPipe modules:', importError);
+        throw new Error('Failed to load MediaPipe. Please check your internet connection and try again.');
+      }
+      
       const hands = new mpHands.Hands({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        locateFile: (file) => {
+          console.log(`Loading MediaPipe file: ${file}`);
+          return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }
       });
       
       hands.setOptions({
         maxNumHands: 1,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.5,
+        modelComplexity: 0, // Reduced complexity for better performance
+        minDetectionConfidence: 0.7, // Higher confidence for better accuracy
         minTrackingConfidence: 0.5
       });
       
       hands.onResults(onResults);
       handsRef.current = hands;
+      console.log('MediaPipe Hands initialized successfully');
       
       if (videoRef.current) {
+        console.log('Starting camera...');
+        let frameCount = 0;
         const camera = new cameraUtils.Camera(videoRef.current, {
           onFrame: async () => {
-            if (videoRef.current && handsRef.current) {
-              await handsRef.current.send({ image: videoRef.current });
+            // Process every 3rd frame to reduce load and prevent freezing
+            frameCount++;
+            if (frameCount % 3 === 0 && videoRef.current && handsRef.current) {
+              try {
+                await handsRef.current.send({ image: videoRef.current });
+              } catch (error) {
+                console.error('Error processing frame:', error);
+              }
             }
           },
           width: 640,
           height: 480
         });
         await camera.start();
+        console.log('Camera started successfully');
       }
       
       setIsInitialized(true);
       setError(null);
+      console.log('Camera initialization completed successfully');
     } catch (err) {
+      console.error('Camera/MediaPipe initialization error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
-      setError(`Failed to initialize camera: ${errorMessage}`);
+      
+      // Provide more helpful error messages for common Netlify issues
+      if (errorMessage.includes('KC.Hands is not a constructor')) {
+        if (retryCount < 3) {
+          setRetryCount(prev => prev + 1);
+          setTimeout(() => {
+            console.log('Retrying MediaPipe initialization...');
+            initializeCamera();
+          }, 2000);
+          return;
+        } else {
+          setError('MediaPipe failed to load after multiple attempts. This is a known issue with Netlify. Please try refreshing the page or check your internet connection.');
+        }
+      } else if (errorMessage.includes('Failed to load MediaPipe')) {
+        if (retryCount < 3) {
+          setRetryCount(prev => prev + 1);
+          setTimeout(() => {
+            console.log('Retrying MediaPipe initialization...');
+            initializeCamera();
+          }, 2000);
+          return;
+        } else {
+          setError('MediaPipe modules could not be loaded after multiple attempts. Please check your internet connection and try again.');
+        }
+      } else {
+        setError(`Failed to initialize camera: ${errorMessage}`);
+      }
     }
   }, [onResults, countFingers]);
 
@@ -194,12 +275,19 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
     };
   }, [initializeCamera, enabled]);
 
+  const reinitialize = useCallback(() => {
+    setRetryCount(0);
+    setError(null);
+    setIsInitialized(false);
+    initializeCamera();
+  }, [initializeCamera]);
+
   return {
     videoRef,
     canvasRef,
     gestureResult,
     isInitialized,
     error,
-    reinitialize: initializeCamera
+    reinitialize
   };
 };
