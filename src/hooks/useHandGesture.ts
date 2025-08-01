@@ -6,7 +6,7 @@ interface HandGestureResult {
   isDetecting: boolean;
 }
 
-export const useHandGesture = (isFrozen: boolean) => {
+export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [gestureResult, setGestureResult] = useState<HandGestureResult>({
@@ -183,7 +183,9 @@ export const useHandGesture = (isFrozen: boolean) => {
   }, [onResults, countFingers]);
 
   useEffect(() => {
-    initializeCamera();
+    if (enabled) {
+      initializeCamera();
+    }
     
     return () => {
       if (videoRef.current && videoRef.current.srcObject) {
@@ -191,7 +193,7 @@ export const useHandGesture = (isFrozen: boolean) => {
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [initializeCamera]);
+  }, [initializeCamera, enabled]);
 
   return {
     videoRef,
