@@ -123,16 +123,19 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
 
   const loadMediaPipeModules = async () => {
     try {
-      // Dynamic imports to handle different environments
-      const [cameraUtils, mpHands] = await Promise.all([
-        import('@mediapipe/camera_utils'),
-        import('@mediapipe/hands')
-      ]);
-
+      // Load MediaPipe modules with better error handling
+      const cameraUtils = await import('@mediapipe/camera_utils');
+      const mpHands = await import('@mediapipe/hands');
+      
+      // Validate that the modules loaded correctly
+      if (!cameraUtils || !mpHands) {
+        throw new Error('MediaPipe modules failed to load');
+      }
+      
       return { cameraUtils, mpHands };
     } catch (error) {
       console.error('Failed to load MediaPipe modules:', error);
-      throw new Error('MediaPipe modules could not be loaded');
+      throw new Error(`MediaPipe modules could not be loaded: ${error.message}`);
     }
   };
 
@@ -168,16 +171,23 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
       // Load MediaPipe modules dynamically
       const { cameraUtils, mpHands } = await loadMediaPipeModules();
       
-      // Try different ways to access the Hands constructor
-      let HandsConstructor;
-      if (mpHands.Hands) {
+      // More robust way to access the Hands constructor
+      let HandsConstructor = null;
+      
+      // Try multiple ways to access the constructor
+      if (typeof mpHands.Hands === 'function') {
         HandsConstructor = mpHands.Hands;
-      } else if ((mpHands as any).default?.Hands) {
-        HandsConstructor = (mpHands as any).default.Hands;
-      } else if ((mpHands as any).default) {
+      } else if (typeof (mpHands as any).default === 'function') {
         HandsConstructor = (mpHands as any).default;
-      } else {
-        throw new Error('Hands constructor not found in MediaPipe module');
+      } else if (typeof (mpHands as any).default?.Hands === 'function') {
+        HandsConstructor = (mpHands as any).default.Hands;
+      } else if (typeof (window as any).Hands === 'function') {
+        // Fallback to global if available
+        HandsConstructor = (window as any).Hands;
+      }
+      
+      if (!HandsConstructor) {
+        throw new Error('Hands constructor not found. MediaPipe may not be properly loaded.');
       }
 
       const hands = new HandsConstructor({
@@ -195,16 +205,22 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
       handsRef.current = hands;
       
       if (videoRef.current) {
-        // Try different ways to access the Camera constructor
-        let CameraConstructor;
-        if (cameraUtils.Camera) {
+        // More robust way to access the Camera constructor
+        let CameraConstructor = null;
+        
+        if (typeof cameraUtils.Camera === 'function') {
           CameraConstructor = cameraUtils.Camera;
-        } else if ((cameraUtils as any).default?.Camera) {
-          CameraConstructor = (cameraUtils as any).default.Camera;
-        } else if ((cameraUtils as any).default) {
+        } else if (typeof (cameraUtils as any).default === 'function') {
           CameraConstructor = (cameraUtils as any).default;
-        } else {
-          throw new Error('Camera constructor not found in MediaPipe module');
+        } else if (typeof (cameraUtils as any).default?.Camera === 'function') {
+          CameraConstructor = (cameraUtils as any).default.Camera;
+        } else if (typeof (window as any).Camera === 'function') {
+          // Fallback to global if available
+          CameraConstructor = (window as any).Camera;
+        }
+        
+        if (!CameraConstructor) {
+          throw new Error('Camera constructor not found. MediaPipe camera utils may not be properly loaded.');
         }
 
         const camera = new CameraConstructor(videoRef.current, {

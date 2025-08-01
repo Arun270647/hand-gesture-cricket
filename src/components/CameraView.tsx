@@ -18,7 +18,13 @@ export const CameraView = ({ videoRef, canvasRef, gestureResult, isInitialized, 
     return (
       <div className="camera-view w-full max-w-md mx-auto p-6 text-center">
         <Camera className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
-        <p className="text-destructive mb-4">{error}</p>
+        <div className="text-destructive mb-4">
+          <p className="font-semibold mb-2">Camera Error</p>
+          <p className="text-sm">{error}</p>
+          <p className="text-xs mt-2 text-muted-foreground">
+            This may be due to browser compatibility or network issues. Please try refreshing the page or using a different browser.
+          </p>
+        </div>
         <Button onClick={reinitialize} variant="outline">
           <RefreshCw className="w-4 h-4 mr-2" />
           Retry Camera
