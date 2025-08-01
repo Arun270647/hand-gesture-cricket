@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { CameraView } from './CameraView';
 import { ScoreBoard } from './ScoreBoard';
 import { toast } from 'sonner';
-import { Trophy, Play, RotateCcw } from 'lucide-react';
+import { Trophy, RotateCcw, Swords, Shield } from 'lucide-react';
+import { useHandGesture } from '@/hooks/useHandGesture';
 
 type GamePhase = 'toss' | 'batting' | 'bowling' | 'gameOver';
 type TossChoice = 'odd' | 'even';
@@ -24,290 +25,196 @@ interface GameState {
 
 export const GameBoard = () => {
   const [gameState, setGameState] = useState<GameState>({
-    phase: 'toss',
-    playerScore: 0,
-    computerScore: 0,
-    playerChoice: null,
-    target: 0,
-    currentInnings: 'first',
-    playerBatting: false,
-    isPlayerTurn: true,
-    gameActive: false
+    phase: 'toss', playerScore: 0, computerScore: 0, playerChoice: null, target: 0,
+    currentInnings: 'first', playerBatting: false, isPlayerTurn: true, gameActive: false
   });
 
-  const [lastMove, setLastMove] = useState<{
-    player: number;
-    computer: number;
-    sum: number;
-    result: string;
-  } | null>(null);
+  const [lastMove, setLastMove] = useState<{ player: number; computer: number; sum: number; result: string; } | null>(null);
+  const [showTossOptions, setShowTossOptions] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [isFrozen, setIsFrozen] = useState(false);
+  
+  const { videoRef, canvasRef, gestureResult, isInitialized, error, reinitialize } = useHandGesture(isFrozen);
+
+  const gestureResultRef = useRef(gestureResult);
+  useEffect(() => {
+    gestureResultRef.current = gestureResult;
+  }, [gestureResult]);
 
   const resetGame = () => {
     setGameState({
-      phase: 'toss',
-      playerScore: 0,
-      computerScore: 0,
-      playerChoice: null,
-      target: 0,
-      currentInnings: 'first',
-      playerBatting: false,
-      isPlayerTurn: true,
-      gameActive: false
+      phase: 'toss', playerScore: 0, computerScore: 0, playerChoice: null, target: 0,
+      currentInnings: 'first', playerBatting: false, isPlayerTurn: true, gameActive: false
     });
     setLastMove(null);
+    setShowTossOptions(false);
+    setCountdown(null);
+    setIsFrozen(false);
     toast("New game started!");
+  };
+
+  const startNextTurn = (delay = 1000) => {
+    setIsFrozen(false);
+    setLastMove(null);
+    setTimeout(() => {
+      setCountdown(2); // Countdown will show 2, then 1
+    }, delay);
   };
 
   const handleTossChoice = (choice: TossChoice) => {
     setGameState(prev => ({ ...prev, playerChoice: choice, gameActive: true }));
+    setCountdown(3);
   };
+  
+  useEffect(() => {
+    if (countdown !== null && countdown > 0) {
+      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+      return () => clearTimeout(timer);
+    } else if (countdown === 0) {
+      setIsFrozen(true);
+      handleGestureDetected(gestureResultRef.current.fingerCount);
+      setCountdown(null);
+    }
+  }, [countdown]);
 
-  const generateComputerMove = () => {
-    return Math.floor(Math.random() * 5) + 1; // 1-5
-  };
+  const generateComputerMove = () => Math.floor(Math.random() * 6); // 0-5
 
   const handleGestureDetected = (playerNumber: number) => {
-    if (!gameState.gameActive || playerNumber < 1 || playerNumber > 5) return;
-
+    if (!gameState.gameActive || playerNumber < 0 || playerNumber > 5) return;
+    
     const computerNumber = generateComputerMove();
     const sum = playerNumber + computerNumber;
-    const isOdd = sum % 2 === 1;
+    const isOdd = sum % 2 !== 0;
 
-    setLastMove({
-      player: playerNumber,
-      computer: computerNumber,
-      sum,
-      result: isOdd ? 'odd' : 'even'
-    });
-
-    if (gameState.phase === 'toss') {
-      handleTossResult(isOdd, sum);
-    } else {
-      handleGameMove(playerNumber, computerNumber, sum, isOdd);
-    }
-  };
-
-  const handleTossResult = (isOdd: boolean, sum: number) => {
-    const playerWonToss = (gameState.playerChoice === 'odd' && isOdd) || 
-                         (gameState.playerChoice === 'even' && !isOdd);
-    
-    toast(playerWonToss ? "You won the toss!" : "Computer won the toss!");
-    
-    // For simplicity, winner chooses to bat first
-    const playerBatting = playerWonToss;
-    
-    setGameState(prev => ({
-      ...prev,
-      phase: playerBatting ? 'batting' : 'bowling',
-      playerBatting,
-      isPlayerTurn: true,
-      gameActive: true
-    }));
+    setLastMove({ player: playerNumber, computer: computerNumber, sum, result: isOdd ? 'odd' : 'even' });
+    toast.success(`You showed ${playerNumber}, AI showed ${computerNumber}`);
 
     setTimeout(() => {
-      toast(playerBatting ? "You're batting first!" : "You're bowling first!");
+      if (gameState.phase === 'toss') {
+        handleTossResult(isOdd);
+      } else {
+        handleGameMove(playerNumber, computerNumber);
+      }
     }, 1500);
   };
 
-  const handleGameMove = (playerNumber: number, computerNumber: number, sum: number, isOdd: boolean) => {
-    const isOut = (gameState.playerBatting && gameState.isPlayerTurn && playerNumber === computerNumber) ||
-                  (!gameState.playerBatting && !gameState.isPlayerTurn && playerNumber === computerNumber);
-
-    if (isOut) {
-      handlePlayerOut();
+  const handleTossResult = (isOdd: boolean) => {
+    const playerWonToss = (gameState.playerChoice === 'odd' && isOdd) || (gameState.playerChoice === 'even' && !isOdd);
+    if (playerWonToss) {
+      toast.success("You won the toss! Please choose to bat or bowl.");
+      setShowTossOptions(true);
     } else {
-      updateScore(playerNumber, computerNumber);
+      toast.error("Computer won the toss!");
+      setTimeout(() => {
+        toast("Computer has chosen to bat.");
+        setGameState(prev => ({ ...prev, phase: 'bowling', playerBatting: false, isPlayerTurn: true }));
+        startNextTurn();
+      }, 2000);
+    }
+  };
+
+  const handleBatBowlSelect = (choice: 'bat' | 'bowl') => {
+    const isBatting = choice === 'bat';
+    toast(`You have chosen to ${choice}. Your turn!`);
+    setGameState(prev => ({ ...prev, phase: isBatting ? 'batting' : 'bowling', playerBatting: isBatting, isPlayerTurn: true }));
+    setShowTossOptions(false);
+    startNextTurn();
+  };
+  
+  const handleGameMove = (playerNumber: number, computerNumber: number) => {
+    if (playerNumber === computerNumber) {
+        handlePlayerOut();
+    } else {
+        updateScore(playerNumber, computerNumber);
+        startNextTurn();
     }
   };
 
   const handlePlayerOut = () => {
-    toast("OUT! Innings completed!");
-    
+    toast.error("OUT! Innings completed!");
     if (gameState.currentInnings === 'first') {
-      // Switch innings
-      const target = gameState.playerBatting ? gameState.playerScore + 1 : gameState.computerScore + 1;
-      
+      const target = (gameState.playerBatting ? gameState.playerScore : gameState.computerScore) + 1;
       setGameState(prev => ({
-        ...prev,
-        currentInnings: 'second',
-        phase: prev.playerBatting ? 'bowling' : 'batting',
-        playerBatting: !prev.playerBatting,
-        target,
-        isPlayerTurn: true
+        ...prev, currentInnings: 'second', phase: prev.playerBatting ? 'bowling' : 'batting',
+        playerBatting: !prev.playerBatting, target, isPlayerTurn: true
       }));
-
       setTimeout(() => {
-        toast(`Target: ${target} runs!`);
+        toast.info(`Target to win: ${target} runs!`);
+        startNextTurn();
       }, 1500);
     } else {
-      // Game over
       endGame();
     }
   };
 
   const updateScore = (playerNumber: number, computerNumber: number) => {
-    const runs = gameState.playerBatting === gameState.isPlayerTurn ? playerNumber : computerNumber;
-    
+    const runs = gameState.playerBatting ? playerNumber : computerNumber;
     setGameState(prev => {
-      const newPlayerScore = gameState.playerBatting && gameState.isPlayerTurn ? 
-        prev.playerScore + runs : prev.playerScore;
-      const newComputerScore = !gameState.playerBatting && !gameState.isPlayerTurn ? 
-        prev.computerScore + runs : prev.computerScore;
-
-      // Check if target is achieved in second innings
+      const newPlayerScore = prev.playerBatting ? prev.playerScore + runs : prev.playerScore;
+      const newComputerScore = !prev.playerBatting ? prev.computerScore + runs : prev.computerScore;
       if (prev.currentInnings === 'second') {
         const chasingScore = prev.playerBatting ? newPlayerScore : newComputerScore;
         if (chasingScore >= prev.target) {
-          setTimeout(() => endGame(true), 1000);
+          setTimeout(() => endGame(true), 500);
+          return { ...prev, playerScore: newPlayerScore, computerScore: newComputerScore };
         }
       }
-
-      return {
-        ...prev,
-        playerScore: newPlayerScore,
-        computerScore: newComputerScore,
-        isPlayerTurn: !prev.isPlayerTurn
-      };
+      return { ...prev, playerScore: newPlayerScore, computerScore: newComputerScore };
     });
-
-    toast(`${runs} run${runs !== 1 ? 's' : ''} scored!`);
+    toast.success(`${runs} run${runs !== 1 ? 's' : ''}!`);
   };
 
   const endGame = (targetReached = false) => {
+    const playerWon = targetReached ? gameState.playerBatting : gameState.playerScore > gameState.computerScore;
     setGameState(prev => ({ ...prev, phase: 'gameOver', gameActive: false }));
-    
-    const playerWon = targetReached ? 
-      gameState.playerBatting : 
-      gameState.playerScore > gameState.computerScore;
-
-    setTimeout(() => {
-      toast(playerWon ? "🎉 You won!" : "💻 Computer won!", {
-        duration: 5000
-      });
-    }, 1000);
+    setTimeout(() => toast(playerWon ? "🎉 Congratulations, You won!" : "💻 Computer won!", { duration: 5000 }), 1000);
   };
-
+  
   const getGameStatus = () => {
+    if (showTossOptions) return "Choose to bat or bowl.";
+    if (countdown !== null) return `Showing number in ${countdown}...`;
+    if (isFrozen) return "Processing move...";
     switch (gameState.phase) {
-      case 'toss':
-        return 'Choose Odd or Even for toss';
-      case 'batting':
-        return gameState.playerBatting ? 'You are batting' : 'You are bowling';
-      case 'bowling':
-        return gameState.playerBatting ? 'You are batting' : 'You are bowling';
-      case 'gameOver':
-        return 'Game Over';
-      default:
-        return 'Hand Cricket AI';
+      case 'toss': return gameState.playerChoice ? 'Show your number for the toss' : 'Choose Odd or Even for toss';
+      case 'batting': return gameState.playerBatting ? 'You are batting' : 'Computer is batting';
+      case 'bowling': return gameState.playerBatting ? 'Computer is bowling' : 'You are bowling';
+      case 'gameOver': return 'Game Over';
+      default: return 'Hand Cricket AI';
     }
   };
 
   return (
     <div className="min-h-screen p-4">
       <div className="max-w-6xl mx-auto">
-        {/* Header */}
         <div className="text-center mb-8 bounce-in">
           <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-primary to-cricket-ball bg-clip-text text-transparent">
             Hand Cricket AI
           </h1>
           <p className="text-muted-foreground">{getGameStatus()}</p>
         </div>
-
         <div className="grid lg:grid-cols-2 gap-8">
-          {/* Left Column - Camera and Controls */}
           <div className="space-y-6">
-            <CameraView
-              onGestureDetected={handleGestureDetected}
-              isGameActive={gameState.gameActive && gameState.isPlayerTurn}
-            />
-
-            {/* Toss Selection */}
-            {gameState.phase === 'toss' && !gameState.playerChoice && (
-              <Card className="game-card text-center">
-                <h3 className="text-xl font-semibold mb-4">Choose for Toss</h3>
-                <div className="flex gap-4 justify-center">
-                  <Button
-                    onClick={() => handleTossChoice('odd')}
-                    variant="outline"
-                    className="px-8 py-4 text-lg"
-                  >
-                    Odd
-                  </Button>
-                  <Button
-                    onClick={() => handleTossChoice('even')}
-                    variant="outline"
-                    className="px-8 py-4 text-lg"
-                  >
-                    Even
-                  </Button>
+            <div className="flex items-center justify-center gap-4">
+              <CameraView {...{ videoRef, canvasRef, gestureResult, isInitialized, error, reinitialize, isFrozen }} />
+              {countdown !== null && countdown > 0 && (
+                <div className="text-6xl font-bold text-primary animate-ping">
+                  {countdown}
                 </div>
-              </Card>
+              )}
+            </div>
+            {gameState.phase === 'toss' && !gameState.playerChoice && !showTossOptions && (
+              <Card className="game-card text-center"><h3 className="text-xl font-semibold mb-4">Choose for Toss</h3><div className="flex gap-4 justify-center"><Button onClick={() => handleTossChoice('odd')} variant="outline" className="px-8 py-4 text-lg">Odd</Button><Button onClick={() => handleTossChoice('even')} variant="outline" className="px-8 py-4 text-lg">Even</Button></div></Card>
             )}
-
-            {/* Last Move Display */}
+            {showTossOptions && (
+              <Card className="game-card text-center"><h3 className="text-xl font-semibold mb-4">You Won the Toss!</h3><div className="flex gap-4 justify-center"><Button onClick={() => handleBatBowlSelect('bat')} size="lg"><Swords className="mr-2 h-5 w-5" /> Bat</Button><Button onClick={() => handleBatBowlSelect('bowl')} size="lg"><Shield className="mr-2 h-5 w-5" /> Bowl</Button></div></Card>
+            )}
             {lastMove && (
-              <Card className="game-card">
-                <h3 className="font-semibold mb-3">Last Move</h3>
-                <div className="grid grid-cols-3 gap-4 text-center">
-                  <div>
-                    <div className="text-2xl font-bold text-primary">{lastMove.player}</div>
-                    <div className="text-sm text-muted-foreground">You</div>
-                  </div>
-                  <div>
-                    <div className="text-xl font-semibold">+</div>
-                    <div className="text-xs text-muted-foreground">Sum: {lastMove.sum}</div>
-                  </div>
-                  <div>
-                    <div className="text-2xl font-bold text-cricket-ball">{lastMove.computer}</div>
-                    <div className="text-sm text-muted-foreground">AI</div>
-                  </div>
-                </div>
-                <div className="mt-3 text-center">
-                  <Badge variant="secondary">{lastMove.result.toUpperCase()}</Badge>
-                </div>
-              </Card>
+              <Card className="game-card"><h3 className="font-semibold mb-3">Last Move</h3><div className="grid grid-cols-3 gap-4 text-center"><div><div className="text-2xl font-bold text-primary">{lastMove.player}</div><div className="text-sm text-muted-foreground">You</div></div><div><div className="text-xl font-semibold">+</div><div className="text-xs text-muted-foreground">Sum: {lastMove.sum}</div></div><div><div className="text-2xl font-bold text-cricket-ball">{lastMove.computer}</div><div className="text-sm text-muted-foreground">AI</div></div></div>{lastMove.result && gameState.phase === 'toss' && (<div className="mt-3 text-center"><Badge variant="secondary">{lastMove.result.toUpperCase()}</Badge></div>)}</Card>
             )}
           </div>
-
-          {/* Right Column - Score and Game Info */}
           <div className="space-y-6">
-            <ScoreBoard gameState={gameState} />
-
-            {/* Game Controls */}
-            <Card className="game-card text-center">
-              <div className="space-y-4">
-                {gameState.phase === 'gameOver' && (
-                  <div className="mb-4">
-                    <Trophy className="w-16 h-16 mx-auto mb-2 text-cricket-ball" />
-                    <h3 className="text-xl font-semibold">
-                      {gameState.playerScore > gameState.computerScore ? 'You Won!' : 'Computer Won!'}
-                    </h3>
-                  </div>
-                )}
-
-                <Button
-                  onClick={resetGame}
-                  variant="outline"
-                  size="lg"
-                  className="w-full"
-                >
-                  <RotateCcw className="w-4 h-4 mr-2" />
-                  New Game
-                </Button>
-
-                {/* Game Instructions */}
-                <div className="text-left text-sm text-muted-foreground mt-4 p-4 bg-muted/50 rounded-lg">
-                  <h4 className="font-semibold mb-2">How to Play:</h4>
-                  <ul className="space-y-1 text-xs">
-                    <li>• Show 1-5 fingers to the camera</li>
-                    <li>• Odd/Even sum wins the toss</li>
-                    <li>• Same numbers = OUT!</li>
-                    <li>• Score runs when batting</li>
-                    <li>• Defend when bowling</li>
-                  </ul>
-                </div>
-              </div>
-            </Card>
+            <ScoreBoard gameState={gameState} lastMove={lastMove} liveFingerCount={gestureResult.fingerCount} tossInProgress={isFrozen} />
+            <Card className="game-card text-center"><div className="space-y-4">{gameState.phase === 'gameOver' && (<div className="mb-4"><Trophy className="w-16 h-16 mx-auto mb-2 text-yellow-500" /><h3 className="text-xl font-semibold">{gameState.playerScore > gameState.computerScore ? 'Congratulations, You Won!' : 'Computer Won!'}</h3></div>)}<Button onClick={resetGame} variant="outline" size="lg" className="w-full"><RotateCcw className="w-4 h-4 mr-2" />New Game</Button><div className="text-left text-sm text-muted-foreground mt-4 p-4 bg-muted/50 rounded-lg"><h4 className="font-semibold mb-2">How to Play:</h4><ul className="space-y-1 text-xs"><li>• Show 0-5 fingers to the camera.</li><li>• Odd/Even sum wins the toss.</li><li>• Same numbers = OUT!</li><li>• Score runs when batting.</li></ul></div></div></Card>
           </div>
         </div>
       </div>
