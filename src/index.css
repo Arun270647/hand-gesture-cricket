@@ -2,39 +2,67 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+/* Hand Cricket AI Design System - Cricket Stadium Theme
 All colors MUST be HSL.
 */
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Cricket Field Colors */
+    --background: 150 30% 95%;
+    --foreground: 160 100% 5%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 160 100% 8%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover-foreground: 160 100% 8%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    /* Cricket Green Primary */
+    --primary: 140 60% 25%;
+    --primary-foreground: 0 0% 98%;
+    
+    /* Cricket Ball Orange */
+    --cricket-ball: 25 95% 55%;
+    --cricket-ball-foreground: 0 0% 98%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    /* Stadium Colors */
+    --secondary: 150 15% 92%;
+    --secondary-foreground: 160 100% 15%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 150 15% 88%;
+    --muted-foreground: 160 30% 40%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 60 100% 88%;
+    --accent-foreground: 160 100% 15%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --border: 150 20% 85%;
+    --input: 150 15% 90%;
+    --ring: 140 60% 25%;
+
+    /* Game Status Colors */
+    --success: 120 60% 50%;
+    --success-foreground: 0 0% 98%;
+    
+    --warning: 45 100% 60%;
+    --warning-foreground: 0 0% 98%;
+    
+    /* Gradients */
+    --gradient-field: linear-gradient(135deg, hsl(var(--primary)), hsl(140 40% 35%));
+    --gradient-stadium: linear-gradient(180deg, hsl(var(--background)), hsl(150 20% 88%));
+    --gradient-ball: linear-gradient(45deg, hsl(var(--cricket-ball)), hsl(15 85% 50%));
+    
+    /* Shadows */
+    --shadow-game: 0 10px 30px -10px hsl(var(--primary) / 0.3);
+    --shadow-camera: 0 0 40px hsl(var(--cricket-ball) / 0.4);
+    --shadow-glow: 0 0 20px hsl(var(--accent) / 0.6);
+    
+    /* Animations */
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --bounce-duration: 0.6s;
 
     --radius: 0.5rem;
 
@@ -100,6 +128,75 @@ All colors MUST be HSL.
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
+    background: var(--gradient-stadium);
+  }
+}
+
+@layer components {
+  .cricket-field {
+    background: var(--gradient-field);
+    border-radius: 1rem;
+    box-shadow: var(--shadow-game);
+  }
+  
+  .camera-view {
+    border-radius: 1rem;
+    box-shadow: var(--shadow-camera);
+    background: hsl(var(--card));
+  }
+  
+  .game-card {
+    @apply rounded-xl p-6;
+    background: hsl(var(--card));
+    box-shadow: var(--shadow-game);
+    transition: var(--transition-smooth);
+  }
+  
+  .game-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-glow);
+  }
+  
+  .gesture-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    z-index: 10;
+  }
+  
+  .pulse-animation {
+    animation: pulse-glow 2s infinite;
+  }
+  
+  .bounce-in {
+    animation: bounce-in var(--bounce-duration) ease-out;
+  }
+  
+  @keyframes pulse-glow {
+    0%, 100% { 
+      box-shadow: 0 0 20px hsl(var(--cricket-ball) / 0.3);
+    }
+    50% { 
+      box-shadow: 0 0 40px hsl(var(--cricket-ball) / 0.6);
+    }
+  }
+  
+  @keyframes bounce-in {
+    0% {
+      transform: scale(0.3) translateY(100px);
+      opacity: 0;
+    }
+    50% {
+      transform: scale(1.05);
+    }
+    70% {
+      transform: scale(0.9);
+    }
+    100% {
+      transform: scale(1) translateY(0);
+      opacity: 1;
+    }
   }
 }
