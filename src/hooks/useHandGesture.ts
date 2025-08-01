@@ -121,25 +121,52 @@ export const useHandGesture = () => {
 
   const initializeCamera = useCallback(async () => {
     try {
+      console.log('Starting camera initialization...');
+      
+      // Request camera permissions
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480 }
+        video: { 
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          facingMode: 'user'
+        }
       });
+      
+      console.log('Camera stream obtained successfully');
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await new Promise((resolve) => {
+        console.log('Video stream attached to video element');
+        
+        await new Promise((resolve, reject) => {
           if (videoRef.current) {
-            videoRef.current.onloadedmetadata = resolve;
+            videoRef.current.onloadedmetadata = () => {
+              console.log('Video metadata loaded');
+              resolve(true);
+            };
+            videoRef.current.onerror = reject;
           }
         });
+        
+        // Set canvas dimensions to match video
+        if (canvasRef.current && videoRef.current) {
+          const video = videoRef.current;
+          canvasRef.current.width = video.videoWidth || 640;
+          canvasRef.current.height = video.videoHeight || 480;
+          console.log(`Canvas dimensions set to: ${canvasRef.current.width}x${canvasRef.current.height}`);
+        }
       }
       
       // Initialize MediaPipe Hands
+      console.log('Initializing MediaPipe Hands...');
       const { Hands } = await import('@mediapipe/hands');
       const { Camera } = await import('@mediapipe/camera_utils');
       
       const hands = new Hands({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        locateFile: (file) => {
+          console.log(`Loading MediaPipe file: ${file}`);
+          return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }
       });
       
       hands.setOptions({
@@ -151,8 +178,10 @@ export const useHandGesture = () => {
       
       hands.onResults(onResults);
       handsRef.current = hands;
+      console.log('MediaPipe Hands initialized successfully');
       
       if (videoRef.current) {
+        console.log('Starting camera...');
         const camera = new Camera(videoRef.current, {
           onFrame: async () => {
             if (videoRef.current && handsRef.current) {
@@ -162,14 +191,17 @@ export const useHandGesture = () => {
           width: 640,
           height: 480
         });
-        camera.start();
+        await camera.start();
+        console.log('Camera started successfully');
       }
       
       setIsInitialized(true);
       setError(null);
+      console.log('Camera initialization completed successfully');
     } catch (err) {
-      setError('Failed to initialize camera or hand tracking');
       console.error('Camera/MediaPipe initialization error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      setError(`Failed to initialize camera: ${errorMessage}`);
     }
   }, [onResults]);
 

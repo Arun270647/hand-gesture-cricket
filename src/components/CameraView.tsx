@@ -37,21 +37,41 @@ export const CameraView = ({ onGestureDetected, isGameActive }: CameraViewProps)
 
   return (
     <div className="camera-view relative w-full max-w-md mx-auto">
-      <div className="relative overflow-hidden rounded-xl">
+      <div className="relative overflow-hidden rounded-xl bg-gray-900 min-h-[360px] flex items-center justify-center">
+        {/* Video Element - Hidden but used for processing */}
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted
           className="absolute inset-0 w-full h-full object-cover scale-x-[-1]"
-          style={{ visibility: 'hidden' }}
+          style={{ 
+            visibility: isInitialized ? 'visible' : 'hidden',
+            opacity: isInitialized ? 0.3 : 0 
+          }}
         />
+        
+        {/* Canvas Overlay for Gesture Recognition */}
         <canvas
           ref={canvasRef}
           width={640}
           height={480}
-          className="w-full h-auto scale-x-[-1] gesture-overlay"
+          className="relative w-full h-auto scale-x-[-1] max-w-full"
+          style={{ 
+            display: isInitialized ? 'block' : 'none',
+            minHeight: '360px'
+          }}
         />
+        
+        {/* Loading State */}
+        {!isInitialized && !error && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="text-center text-white">
+              <Camera className="w-12 h-12 mx-auto mb-2 animate-pulse" />
+              <p>Initializing camera...</p>
+            </div>
+          </div>
+        )}
         
         {/* Gesture Status Overlay */}
         <div className="absolute top-4 left-4 right-4">
