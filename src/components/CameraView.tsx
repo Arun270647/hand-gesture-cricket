@@ -10,17 +10,59 @@ interface CameraViewProps {
 
 export const CameraView = ({ onGestureDetected, isGameActive }: CameraViewProps) => {
   const { videoRef, canvasRef, gestureResult, isInitialized, error, reinitialize } = useHandGesture();
+  const [lastDetectedNumber, setLastDetectedNumber] = React.useState<number>(0);
+  const [detectionTimer, setDetectionTimer] = React.useState<NodeJS.Timeout | null>(null);
+  const [confirmationProgress, setConfirmationProgress] = React.useState(0);
 
-  // Auto-detect gesture when game is active and fingers are detected
+  // Enhanced gesture detection with smoother confirmation
   React.useEffect(() => {
     if (isGameActive && gestureResult.isDetecting && gestureResult.fingerCount > 0) {
-      const timer = setTimeout(() => {
-        onGestureDetected(gestureResult.fingerCount);
-      }, 1000); // 1 second delay to confirm gesture
+      const currentNumber = gestureResult.fingerCount;
       
-      return () => clearTimeout(timer);
+      if (currentNumber === lastDetectedNumber && currentNumber > 0) {
+        // Same number detected, start/continue confirmation timer
+        if (!detectionTimer) {
+          let progress = 0;
+          const timer = setInterval(() => {
+            progress += 10;
+            setConfirmationProgress(progress);
+            
+            if (progress >= 100) {
+              onGestureDetected(currentNumber);
+              clearInterval(timer);
+              setDetectionTimer(null);
+              setConfirmationProgress(0);
+              setLastDetectedNumber(0);
+            }
+          }, 100); // 1 second total (100ms * 10)
+          
+          setDetectionTimer(timer);
+        }
+      } else {
+        // Different number detected, reset timer
+        if (detectionTimer) {
+          clearInterval(detectionTimer);
+          setDetectionTimer(null);
+        }
+        setConfirmationProgress(0);
+        setLastDetectedNumber(currentNumber);
+      }
+    } else {
+      // No gesture detected, clear timer
+      if (detectionTimer) {
+        clearInterval(detectionTimer);
+        setDetectionTimer(null);
+      }
+      setConfirmationProgress(0);
+      setLastDetectedNumber(0);
     }
-  }, [isGameActive, gestureResult, onGestureDetected]);
+    
+    return () => {
+      if (detectionTimer) {
+        clearInterval(detectionTimer);
+      }
+    };
+  }, [isGameActive, gestureResult, lastDetectedNumber, detectionTimer, onGestureDetected]);
 
   if (error) {
     return (
@@ -85,9 +127,9 @@ export const CameraView = ({ onGestureDetected, isGameActive }: CameraViewProps)
               }`} />
             </div>
             
-            {gestureResult.isDetecting && (
+            {gestureResult.isDetecting ? (
               <div className="mt-2 text-center">
-                <div className="text-2xl font-bold text-cricket-ball">
+                <div className="text-3xl font-bold text-cricket-ball mb-1">
                   {gestureResult.fingerCount}
                 </div>
                 <div className="text-xs text-muted-foreground">
@@ -95,6 +137,25 @@ export const CameraView = ({ onGestureDetected, isGameActive }: CameraViewProps)
                    gestureResult.fingerCount === 1 ? '1 finger' : 
                    `${gestureResult.fingerCount} fingers`}
                 </div>
+                
+                {/* Confirmation Progress Bar */}
+                {isGameActive && confirmationProgress > 0 && (
+                  <div className="mt-2">
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div 
+                        className="bg-cricket-ball h-2 rounded-full transition-all duration-100"
+                        style={{ width: `${confirmationProgress}%` }}
+                      />
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Hold steady... {Math.round(confirmationProgress)}%
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mt-2 text-center text-muted-foreground text-sm">
+                Show your hand (1-5 fingers)
               </div>
             )}
           </div>

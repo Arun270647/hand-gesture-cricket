@@ -26,22 +26,46 @@ export const useHandGesture = () => {
 
     const tips = [4, 8, 12, 16, 20]; // Thumb, Index, Middle, Ring, Pinky
     const pips = [3, 6, 10, 14, 18]; // Joints below tips
+    const mcp = [2, 5, 9, 13, 17]; // Knuckles for better accuracy
     
     let fingerCount = 0;
     
-    // Thumb (special case - check x coordinate)
-    if (hand.landmark[tips[0]].x > hand.landmark[pips[0]].x) {
+    // Enhanced thumb detection (check both x and y relative to wrist)
+    const wrist = hand.landmark[0];
+    const thumbTip = hand.landmark[4];
+    const thumbMcp = hand.landmark[2];
+    
+    // Thumb is extended if tip is farther from wrist than MCP joint
+    const thumbWristDist = Math.sqrt(
+      Math.pow(thumbTip.x - wrist.x, 2) + Math.pow(thumbTip.y - wrist.y, 2)
+    );
+    const thumbMcpWristDist = Math.sqrt(
+      Math.pow(thumbMcp.x - wrist.x, 2) + Math.pow(thumbMcp.y - wrist.y, 2)
+    );
+    
+    if (thumbWristDist > thumbMcpWristDist * 1.2) {
       fingerCount++;
     }
     
-    // Other fingers (check y coordinate)
+    // Enhanced finger detection for index, middle, ring, pinky
     for (let i = 1; i < 5; i++) {
-      if (hand.landmark[tips[i]].y < hand.landmark[pips[i]].y) {
+      const tip = hand.landmark[tips[i]];
+      const pip = hand.landmark[pips[i]];
+      const mcpJoint = hand.landmark[mcp[i]];
+      
+      // Check if tip is above PIP and PIP is above MCP (finger extended)
+      const tipAbovePip = tip.y < pip.y;
+      const pipAboveMcp = pip.y < mcpJoint.y;
+      
+      // Additional check: tip should be significantly higher than MCP
+      const tipMcpDistance = mcpJoint.y - tip.y;
+      
+      if (tipAbovePip && pipAboveMcp && tipMcpDistance > 0.02) {
         fingerCount++;
       }
     }
     
-    return Math.min(fingerCount, 5); // Cap at 5 fingers
+    return Math.min(Math.max(fingerCount, 0), 5); // Ensure 0-5 range
   }, []);
 
   const onResults = useCallback((results: any) => {
@@ -50,7 +74,7 @@ export const useHandGesture = () => {
       const ctx = canvas.getContext('2d');
       
       if (ctx) {
-        // Clear canvas
+        // Clear canvas with better performance
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
         // Draw video frame
@@ -59,16 +83,32 @@ export const useHandGesture = () => {
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
           const fingerCount = countFingers(results.multiHandLandmarks);
           
-          // Draw hand landmarks
-          for (const landmarks of results.multiHandLandmarks) {
-            drawLandmarks(ctx, landmarks.landmark, canvas.width, canvas.height);
+          // Only draw landmarks if needed for performance
+          if (results.multiHandLandmarks[0].landmark) {
+            drawLandmarks(ctx, results.multiHandLandmarks[0].landmark, canvas.width, canvas.height);
           }
           
-          // Draw finger count
-          ctx.fillStyle = 'hsl(var(--cricket-ball))';
-          ctx.font = 'bold 48px sans-serif';
+          // Draw finger count with better styling
+          ctx.save();
+          ctx.fillStyle = '#FF6B35'; // Cricket ball orange
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 4;
+          ctx.font = 'bold 64px Arial';
           ctx.textAlign = 'center';
-          ctx.fillText(fingerCount.toString(), canvas.width / 2, 80);
+          ctx.textBaseline = 'top';
+          
+          const text = fingerCount.toString();
+          const x = canvas.width / 2;
+          const y = 40;
+          
+          // Draw text outline for better visibility
+          ctx.strokeText(text, x, y);
+          ctx.fillText(text, x, y);
+          
+          // Draw confidence indicator
+          ctx.font = '16px Arial';
+          ctx.fillText(`${fingerCount} finger${fingerCount !== 1 ? 's' : ''}`, x, y + 80);
+          ctx.restore();
           
           setGestureResult({
             fingerCount,
@@ -76,6 +116,14 @@ export const useHandGesture = () => {
             isDetecting: true
           });
         } else {
+          // Show "no hand detected" message
+          ctx.save();
+          ctx.fillStyle = '#888888';
+          ctx.font = '24px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('Show your hand', canvas.width / 2, canvas.height / 2);
+          ctx.restore();
+          
           setGestureResult({
             fingerCount: 0,
             landmarks: [],
@@ -87,29 +135,37 @@ export const useHandGesture = () => {
   }, [countFingers]);
 
   const drawLandmarks = (ctx: CanvasRenderingContext2D, landmarks: any[], width: number, height: number) => {
-    // Draw landmarks
-    ctx.fillStyle = 'hsl(var(--cricket-ball))';
-    landmarks.forEach((landmark) => {
+    // Draw key landmarks only for better performance
+    ctx.save();
+    
+    // Draw finger tips with larger circles
+    const fingerTips = [4, 8, 12, 16, 20]; // Thumb, Index, Middle, Ring, Pinky
+    ctx.fillStyle = '#FF6B35'; // Cricket ball orange
+    fingerTips.forEach((tipIndex) => {
+      const landmark = landmarks[tipIndex];
       const x = landmark.x * width;
       const y = landmark.y * height;
       ctx.beginPath();
-      ctx.arc(x, y, 5, 0, 2 * Math.PI);
+      ctx.arc(x, y, 8, 0, 2 * Math.PI);
       ctx.fill();
     });
     
-    // Draw connections
-    ctx.strokeStyle = 'hsl(var(--primary))';
-    ctx.lineWidth = 2;
-    const connections = [
-      [0, 1], [1, 2], [2, 3], [3, 4], // Thumb
-      [0, 5], [5, 6], [6, 7], [7, 8], // Index
-      [5, 9], [9, 10], [10, 11], [11, 12], // Middle
-      [9, 13], [13, 14], [14, 15], [15, 16], // Ring
-      [13, 17], [17, 18], [18, 19], [19, 20], // Pinky
-      [0, 17] // Palm
+    // Draw palm center
+    const palmCenter = landmarks[0]; // Wrist
+    ctx.fillStyle = '#2E7D32'; // Green
+    ctx.beginPath();
+    ctx.arc(palmCenter.x * width, palmCenter.y * height, 6, 0, 2 * Math.PI);
+    ctx.fill();
+    
+    // Draw simplified hand connections for better performance
+    ctx.strokeStyle = '#2E7D32';
+    ctx.lineWidth = 3;
+    const mainConnections = [
+      [0, 5], [5, 9], [9, 13], [13, 17], [17, 0], // Palm outline
+      [5, 8], [9, 12], [13, 16], [17, 20], [1, 4] // To finger tips
     ];
     
-    connections.forEach(([start, end]) => {
+    mainConnections.forEach(([start, end]) => {
       const startPoint = landmarks[start];
       const endPoint = landmarks[end];
       ctx.beginPath();
@@ -117,6 +173,8 @@ export const useHandGesture = () => {
       ctx.lineTo(endPoint.x * width, endPoint.y * height);
       ctx.stroke();
     });
+    
+    ctx.restore();
   };
 
   const initializeCamera = useCallback(async () => {
@@ -171,8 +229,8 @@ export const useHandGesture = () => {
       
       hands.setOptions({
         maxNumHands: 1,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.5,
+        modelComplexity: 0, // Reduced complexity for better performance
+        minDetectionConfidence: 0.7, // Higher confidence for better accuracy
         minTrackingConfidence: 0.5
       });
       
@@ -182,10 +240,17 @@ export const useHandGesture = () => {
       
       if (videoRef.current) {
         console.log('Starting camera...');
+        let frameCount = 0;
         const camera = new Camera(videoRef.current, {
           onFrame: async () => {
-            if (videoRef.current && handsRef.current) {
-              await handsRef.current.send({ image: videoRef.current });
+            // Process every 3rd frame to reduce load and prevent freezing
+            frameCount++;
+            if (frameCount % 3 === 0 && videoRef.current && handsRef.current) {
+              try {
+                await handsRef.current.send({ image: videoRef.current });
+              } catch (error) {
+                console.error('Error processing frame:', error);
+              }
             }
           },
           width: 640,
