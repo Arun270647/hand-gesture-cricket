@@ -172,18 +172,71 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
       console.log('Loading MediaPipe modules...');
       
       try {
-        // Dynamic imports to avoid Netlify issues
+        // Try multiple approaches to load MediaPipe
         if (!mpHands) {
-          mpHands = await import('@mediapipe/hands');
+          try {
+            // Approach 1: Standard dynamic import
+            const handsModule = await import('@mediapipe/hands');
+            mpHands = handsModule.default || handsModule;
+          } catch (e1) {
+            console.log('Standard import failed, trying alternative approach...');
+            try {
+              // Approach 2: Try with explicit path
+              const handsModule = await import('@mediapipe/hands/hands.js');
+              mpHands = handsModule.default || handsModule;
+            } catch (e2) {
+              console.log('Alternative import failed, trying CDN approach...');
+              // Approach 3: Try loading from CDN directly
+              const script = document.createElement('script');
+              script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js';
+              script.type = 'module';
+              document.head.appendChild(script);
+              
+              // Wait for script to load
+              await new Promise((resolve, reject) => {
+                script.onload = resolve;
+                script.onerror = reject;
+                setTimeout(reject, 10000); // 10 second timeout
+              });
+              
+              // Try to access the global object
+              mpHands = (window as any).mpHands;
+            }
+          }
         }
+        
         if (!cameraUtils) {
-          cameraUtils = await import('@mediapipe/camera_utils');
+          try {
+            const cameraModule = await import('@mediapipe/camera_utils');
+            cameraUtils = cameraModule.default || cameraModule;
+          } catch (e) {
+            console.log('Camera utils import failed, trying CDN approach...');
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js';
+            script.type = 'module';
+            document.head.appendChild(script);
+            
+            await new Promise((resolve, reject) => {
+              script.onload = resolve;
+              script.onerror = reject;
+              setTimeout(reject, 10000);
+            });
+            
+            cameraUtils = (window as any).cameraUtils;
+          }
         }
         
         console.log('MediaPipe modules loaded successfully');
+        console.log('mpHands:', mpHands);
+        console.log('mpHands.Hands:', mpHands?.Hands);
       } catch (importError) {
         console.error('Failed to load MediaPipe modules:', importError);
         throw new Error('Failed to load MediaPipe. Please check your internet connection and try again.');
+      }
+      
+      // Check if Hands constructor is available
+      if (!mpHands?.Hands) {
+        throw new Error('MediaPipe Hands constructor not available. Please try refreshing the page.');
       }
       
       const hands = new mpHands.Hands({
@@ -234,7 +287,7 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
       
       // Provide more helpful error messages for common Netlify issues
-      if (errorMessage.includes('KC.Hands is not a constructor')) {
+      if (errorMessage.includes('is not a constructor') || errorMessage.includes('zl.Hands') || errorMessage.includes('KC.Hands')) {
         if (retryCount < 3) {
           setRetryCount(prev => prev + 1);
           setTimeout(() => {
@@ -245,7 +298,7 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
         } else {
           setError('MediaPipe failed to load after multiple attempts. This is a known issue with Netlify. Please try refreshing the page or check your internet connection.');
         }
-      } else if (errorMessage.includes('Failed to load MediaPipe')) {
+      } else if (errorMessage.includes('Failed to load MediaPipe') || errorMessage.includes('MediaPipe Hands constructor not available')) {
         if (retryCount < 3) {
           setRetryCount(prev => prev + 1);
           setTimeout(() => {
