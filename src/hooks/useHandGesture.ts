@@ -1,6 +1,4 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import * as cameraUtils from '@mediapipe/camera_utils';
-import * as mpHands from '@mediapipe/hands';
 
 interface HandGestureResult {
   fingerCount: number;
@@ -19,6 +17,7 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
   const [isInitialized, setIsInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const handsRef = useRef<any>(null);
+  const cameraRef = useRef<any>(null);
 
   const countFingers = useCallback((results: any) => {
     if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) return 0;
@@ -122,8 +121,26 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
     ctx.restore();
   };
 
+  const loadMediaPipeModules = async () => {
+    try {
+      // Dynamic imports to handle different environments
+      const [cameraUtils, mpHands] = await Promise.all([
+        import('@mediapipe/camera_utils'),
+        import('@mediapipe/hands')
+      ]);
+
+      return { cameraUtils, mpHands };
+    } catch (error) {
+      console.error('Failed to load MediaPipe modules:', error);
+      throw new Error('MediaPipe modules could not be loaded');
+    }
+  };
+
   const initializeCamera = useCallback(async () => {
     try {
+      setError(null);
+      
+      // Get user media first
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { 
           width: { ideal: 640 },
@@ -136,7 +153,9 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
         videoRef.current.srcObject = stream;
         
         await new Promise((resolve) => {
-          if(videoRef.current) videoRef.current.onloadedmetadata = () => resolve(true);
+          if(videoRef.current) {
+            videoRef.current.onloadedmetadata = () => resolve(true);
+          }
         });
         
         if (canvasRef.current && videoRef.current) {
@@ -145,15 +164,24 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
           canvasRef.current.height = video.videoHeight || 480;
         }
       }
+
+      // Load MediaPipe modules dynamically
+      const { cameraUtils, mpHands } = await loadMediaPipeModules();
       
-      const Hands = (mpHands as any).Hands ?? (mpHands as any).default;
-      if (!Hands) {
-        setError("Failed to initialize camera: MediaPipe Hands constructor not found.");
-        console.error("MediaPipe Hands module not found:", mpHands);
-        return;
+      // Try different ways to access the Hands constructor
+      let HandsConstructor;
+      if (mpHands.Hands) {
+        HandsConstructor = mpHands.Hands;
+      } else if ((mpHands as any).default?.Hands) {
+        HandsConstructor = (mpHands as any).default.Hands;
+      } else if ((mpHands as any).default) {
+        HandsConstructor = (mpHands as any).default;
+      } else {
+        throw new Error('Hands constructor not found in MediaPipe module');
       }
-      const hands = new Hands({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+
+      const hands = new HandsConstructor({
+        locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
       });
       
       hands.setOptions({
@@ -167,14 +195,19 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
       handsRef.current = hands;
       
       if (videoRef.current) {
-        const Camera = (cameraUtils as any).Camera ?? (cameraUtils as any).default;
-        if (!Camera) {
-            setError("Failed to initialize camera: MediaPipe Camera constructor not found.");
-            console.error("MediaPipe Camera module not found:", cameraUtils);
-            return;
+        // Try different ways to access the Camera constructor
+        let CameraConstructor;
+        if (cameraUtils.Camera) {
+          CameraConstructor = cameraUtils.Camera;
+        } else if ((cameraUtils as any).default?.Camera) {
+          CameraConstructor = (cameraUtils as any).default.Camera;
+        } else if ((cameraUtils as any).default) {
+          CameraConstructor = (cameraUtils as any).default;
+        } else {
+          throw new Error('Camera constructor not found in MediaPipe module');
         }
 
-        const camera = new Camera(videoRef.current, {
+        const camera = new CameraConstructor(videoRef.current, {
           onFrame: async () => {
             if (videoRef.current && handsRef.current) {
               await handsRef.current.send({ image: videoRef.current });
@@ -183,16 +216,20 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
           width: 640,
           height: 480
         });
+        
+        cameraRef.current = camera;
         await camera.start();
       }
       
       setIsInitialized(true);
       setError(null);
     } catch (err) {
+      console.error('Camera initialization error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
       setError(`Failed to initialize camera: ${errorMessage}`);
+      setIsInitialized(false);
     }
-  }, [onResults, countFingers]);
+  }, [onResults]);
 
   useEffect(() => {
     if (enabled) {
@@ -200,6 +237,16 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
     }
     
     return () => {
+      // Cleanup camera
+      if (cameraRef.current && cameraRef.current.stop) {
+        try {
+          cameraRef.current.stop();
+        } catch (e) {
+          console.warn('Error stopping camera:', e);
+        }
+      }
+      
+      // Cleanup video stream
       if (videoRef.current && videoRef.current.srcObject) {
         const stream = videoRef.current.srcObject as MediaStream;
         stream.getTracks().forEach(track => track.stop());
