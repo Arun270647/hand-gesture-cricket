@@ -146,7 +146,13 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
         }
       }
       
-      const hands = new mpHands.Hands({
+      const Hands = (mpHands as any).Hands ?? (mpHands as any).default;
+      if (!Hands) {
+        setError("Failed to initialize camera: MediaPipe Hands constructor not found.");
+        console.error("MediaPipe Hands module not found:", mpHands);
+        return;
+      }
+      const hands = new Hands({
         locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
       });
       
