@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import * as cameraUtils from '@mediapipe/camera_utils';
+import { Hands } from '@mediapipe/hands';
 
 interface HandGestureResult {
   fingerCount: number;
@@ -144,9 +146,6 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
         }
       }
       
-      const { Hands } = await import('@mediapipe/hands');
-      const { Camera } = await import('@mediapipe/camera_utils');
-      
       const hands = new Hands({
         locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
       });
@@ -162,7 +161,7 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
       handsRef.current = hands;
       
       if (videoRef.current) {
-        const camera = new Camera(videoRef.current, {
+        const camera = new cameraUtils.Camera(videoRef.current, {
           onFrame: async () => {
             if (videoRef.current && handsRef.current) {
               await handsRef.current.send({ image: videoRef.current });
@@ -180,7 +179,7 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
       setError(`Failed to initialize camera: ${errorMessage}`);
     }
-  }, [onResults, countFingers]);
+  }, [onResults]);
 
   useEffect(() => {
     if (enabled) {
