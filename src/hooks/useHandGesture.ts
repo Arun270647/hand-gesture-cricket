@@ -167,7 +167,14 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
       handsRef.current = hands;
       
       if (videoRef.current) {
-        const camera = new cameraUtils.Camera(videoRef.current, {
+        const Camera = (cameraUtils as any).Camera ?? (cameraUtils as any).default;
+        if (!Camera) {
+            setError("Failed to initialize camera: MediaPipe Camera constructor not found.");
+            console.error("MediaPipe Camera module not found:", cameraUtils);
+            return;
+        }
+
+        const camera = new Camera(videoRef.current, {
           onFrame: async () => {
             if (videoRef.current && handsRef.current) {
               await handsRef.current.send({ image: videoRef.current });
