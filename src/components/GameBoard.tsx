@@ -41,6 +41,14 @@ export const GameBoard = () => {
     gestureResultRef.current = gestureResult;
   }, [gestureResult]);
 
+  // Always-fresh ref for gameState so countdown effect never reads stale phase
+  const gameStateRef = useRef(gameState);
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
+
+  // Only start countdown once camera is fully ready — prevents reading
+  // empty frameHistory during toss (root cause of toss detection failure)
   useEffect(() => {
     if (hasGameStarted && gameState.playerChoice && isInitialized && countdown === null) {
       setCountdown(3);
@@ -70,7 +78,13 @@ export const GameBoard = () => {
       return () => clearTimeout(timer);
     } else if (countdown === 0) {
       setIsFrozen(true);
-      handleGestureDetected(gestureResultRef.current.fingerCount);
+      const current = gestureResultRef.current;
+      // Debug log: surface detection state at capture moment
+      console.log(`[Toss Capture] fingerCount=${current.fingerCount} | isDetecting=${current.isDetecting} | isStable=${current.isStable} | stabilityMs=${current.stabilityCount}`);
+      if (!current.isDetecting) {
+        console.warn('[Toss Capture] No hand detected at capture — defaulting to 0');
+      }
+      handleGestureDetected(current.fingerCount);
       setCountdown(null);
     }
   }, [countdown]);
@@ -78,8 +92,10 @@ export const GameBoard = () => {
   const generateComputerMove = () => Math.floor(Math.random() * 6);
 
   const handleGestureDetected = (playerNumber: number) => {
-    if (!gameState.gameActive || playerNumber < 0 || playerNumber > 5) return;
-    
+    // Use ref so we always read the live phase, not a closure-captured one
+    const currentPhase = gameStateRef.current.phase;
+    if (!gameStateRef.current.gameActive || playerNumber < 0 || playerNumber > 5) return;
+
     const computerNumber = generateComputerMove();
     const sum = playerNumber + computerNumber;
     const isOdd = sum % 2 !== 0;
@@ -88,7 +104,7 @@ export const GameBoard = () => {
     toast.success(`You showed ${playerNumber}, AI showed ${computerNumber}`);
 
     setTimeout(() => {
-      if (gameState.phase === 'toss') {
+      if (currentPhase === 'toss') {
         handleTossResult(isOdd);
       } else {
         handleGameMove(playerNumber, computerNumber);
@@ -170,7 +186,13 @@ export const GameBoard = () => {
   const getGameStatus = () => {
     if (showTossOptions) return "Choose to bat or bowl.";
     if (!isInitialized && hasGameStarted) return "Initializing Camera...";
-    if (countdown !== null && countdown > 0) return `Showing number in ${countdown}...`;
+    if (countdown !== null && countdown > 0) {
+      // Step 7: UI feedback — warn if hand not stable during countdown
+      if (gestureResult.isDetecting && !gestureResult.isStable) {
+        return `Hold your hand steady... (${countdown})`;
+      }
+      return `Showing number in ${countdown}...`;
+    }
     if (isFrozen) return "Processing move...";
     switch (gameState.phase) {
       case 'toss': return gameState.playerChoice ? 'Show your number for the toss' : 'Choose Odd or Even for toss';

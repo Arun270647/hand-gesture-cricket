@@ -4,6 +4,8 @@ interface HandGestureResult {
   fingerCount: number;
   landmarks: any[];
   isDetecting: boolean;
+  isStable: boolean;
+  stabilityCount: number;
 }
 
 export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
@@ -12,7 +14,9 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
   const [gestureResult, setGestureResult] = useState<HandGestureResult>({
     fingerCount: 0,
     landmarks: [],
-    isDetecting: false
+    isDetecting: false,
+    isStable: false,
+    stabilityCount: 0
   });
   const [isInitialized, setIsInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,6 +24,13 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
   const cameraRef = useRef<any>(null);
 
   const frameHistoryRef = useRef<number[]>([]);
+  // Stability tracking: how long the finalCount has been the same
+  const stableCountRef = useRef<number>(0);
+  const stableValueRef = useRef<number>(-1);
+  const stableTimestampRef = useRef<number>(0);
+  // Ref-forwarded callback so MediaPipe always invokes the latest version
+  // without needing to re-register (fixes stale-closure on isFrozen changes)
+  const onResultsRef = useRef<(results: any) => void>(() => {});
 
   // Helper function to find the most frequent value in an array
   const mode = (arr: number[]): number => {
@@ -95,7 +106,7 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
       }
     }
 
-    console.log("Detected Finger States:", fingerStates);
+    console.log("[Gesture] Finger States:", fingerStates, "| Count:", fingerCount);
     return fingerCount;
   }, []);
 
@@ -111,10 +122,10 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
         }
 
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+          const confidence = results.multiHandedness[0]?.score || 0;
           const rawCount = countFingers(results);
 
           if (rawCount !== -1) {
-            // Step 3: Add Stability Filter
             const maxFrameHistorySize = 5;
             frameHistoryRef.current.push(rawCount);
             if (frameHistoryRef.current.length > maxFrameHistorySize) {
@@ -123,8 +134,18 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
 
             const finalCount = mode(frameHistoryRef.current);
 
-            console.log("Raw Landmarks Output:", results.multiHandLandmarks[0]);
-            console.log("Final Count:", finalCount);
+            // Stability tracking: require same finalCount held for 400ms
+            const now = Date.now();
+            if (finalCount !== stableValueRef.current) {
+              stableValueRef.current = finalCount;
+              stableTimestampRef.current = now;
+              stableCountRef.current = 0;
+            } else {
+              stableCountRef.current = now - stableTimestampRef.current;
+            }
+            const isStable = stableCountRef.current >= 400;
+
+            console.log(`[Gesture] Count: ${finalCount} | Stable: ${isStable} (${stableCountRef.current}ms) | Confidence: ${confidence.toFixed(2)}`);
 
             if (results.multiHandLandmarks[0]) {
               drawLandmarks(ctx, results.multiHandLandmarks[0], canvas.width, canvas.height);
@@ -133,18 +154,28 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
             setGestureResult({
               fingerCount: finalCount,
               landmarks: results.multiHandLandmarks,
-              isDetecting: true
+              isDetecting: true,
+              isStable,
+              stabilityCount: stableCountRef.current
             });
           } else if (results.multiHandLandmarks[0]) {
             drawLandmarks(ctx, results.multiHandLandmarks[0], canvas.width, canvas.height);
           }
         } else {
           frameHistoryRef.current = [];
-          setGestureResult(prev => ({ ...prev, fingerCount: 0, isDetecting: false }));
+          stableValueRef.current = -1;
+          stableTimestampRef.current = 0;
+          stableCountRef.current = 0;
+          setGestureResult(prev => ({ ...prev, fingerCount: 0, isDetecting: false, isStable: false, stabilityCount: 0 }));
         }
       }
     }
   }, [countFingers, isFrozen]);
+
+  // Keep onResultsRef current so MediaPipe always calls the latest version
+  useEffect(() => {
+    onResultsRef.current = onResults;
+  }, [onResults]);
 
   const drawLandmarks = (ctx: CanvasRenderingContext2D, landmarks: any[], width: number, height: number) => {
     ctx.save();
@@ -264,7 +295,9 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
         minTrackingConfidence: 0.5
       });
 
-      hands.onResults(onResults);
+      // Register a stable wrapper so we never need to re-register when
+      // isFrozen changes — the wrapper always delegates to the latest handler.
+      hands.onResults((results: any) => onResultsRef.current(results));
       handsRef.current = hands;
 
       if (videoRef.current) {
@@ -341,4 +374,4 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
     error,
     reinitialize: initializeCamera
   };
-};
+};
