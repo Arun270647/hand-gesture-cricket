@@ -19,37 +19,83 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
   const handsRef = useRef<any>(null);
   const cameraRef = useRef<any>(null);
 
+  const frameHistoryRef = useRef<number[]>([]);
+  
+  // Helper function to find the most frequent value in an array
+  const mode = (arr: number[]): number => {
+    if (arr.length === 0) return 0;
+    const frequencyMap: { [key: number]: number } = {};
+    for (const num of arr) {
+      frequencyMap[num] = (frequencyMap[num] || 0) + 1;
+    }
+    let maxCount = -1;
+    let modeValue = arr[0];
+    for (const key in frequencyMap) {
+      if (frequencyMap[key] > maxCount) {
+        maxCount = frequencyMap[key];
+        modeValue = parseInt(key, 10);
+      }
+    }
+    return modeValue;
+  };
+
   const countFingers = useCallback((results: any) => {
     if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) return 0;
-  
-    const handLandmarks = results.multiHandLandmarks[0];
-    const tipIds = [4, 8, 12, 16, 20];
-    let fingerCount = 0;
-  
-    const wrist = handLandmarks[0];
-    const middleFingerMcp = handLandmarks[9];
-    if (wrist.y < middleFingerMcp.y) {
-        return 0; 
+    
+    // Step 4: Improve Lighting / Confidence Handling
+    const confidence = results.multiHandedness[0]?.score || 0;
+    if (confidence < 0.7) {
+      console.log("Detection confidence too low, ignoring.");
+      return -1;
     }
+
+    const handLandmarks = results.multiHandLandmarks[0];
+    let fingerCount = 0;
+    const fingerStates: boolean[] = [false, false, false, false, false];
+  
+    // Step 7: Edge Case Fixes - Handle partially visible hand
+    if (handLandmarks.length < 21) {
+      return 0; 
+    }
+
+    const wrist = handLandmarks[0];
+    const tipIds = [4, 8, 12, 16, 20];
+    const pipIds = [2, 6, 10, 14, 18];
 
     const handedness = results.multiHandedness[0]?.label || 'Right';
 
     if (handedness === 'Right') {
-        if (handLandmarks[tipIds[0]].x < handLandmarks[tipIds[0] - 1].x && handLandmarks[tipIds[0]].x < handLandmarks[tipIds[0] - 2].x) {
-            fingerCount++;
-        }
+        fingerStates[0] = handLandmarks[tipIds[0]].x < handLandmarks[tipIds[0] - 1].x && handLandmarks[tipIds[0]].x < handLandmarks[tipIds[0] - 2].x;
     } else {
-        if (handLandmarks[tipIds[0]].x > handLandmarks[tipIds[0] - 1].x && handLandmarks[tipIds[0]].x > handLandmarks[tipIds[0] - 2].x) {
+        fingerStates[0] = handLandmarks[tipIds[0]].x > handLandmarks[tipIds[0] - 1].x && handLandmarks[tipIds[0]].x > handLandmarks[tipIds[0] - 2].x;
+    }
+    
+    if (fingerStates[0]) fingerCount++;
+
+    // Step 2: Validate Landmark Logic
+    for (let i = 1; i < 5; i++) {
+        const fingerTip = handLandmarks[tipIds[i]];
+        const fingerPip = handLandmarks[pipIds[i]];
+        
+        const distanceFromWrist = Math.sqrt(
+            Math.pow(fingerTip.x - wrist.x, 2) +
+            Math.pow(fingerTip.y - wrist.y, 2)
+        );
+        const distanceFromPip = Math.sqrt(
+            Math.pow(fingerTip.x - fingerPip.x, 2) +
+            Math.pow(fingerTip.y - fingerPip.y, 2)
+        );
+
+        // Example condition for finger being up
+        if (distanceFromWrist > distanceFromPip * 1.5) {
+            fingerStates[i] = true;
             fingerCount++;
+        } else {
+            fingerStates[i] = false;
         }
     }
-
-    for (let i = 1; i < 5; i++) {
-      if (handLandmarks[tipIds[i]].y < handLandmarks[tipIds[i] - 2].y) {
-        fingerCount++;
-      }
-    }
-  
+    
+    console.log("Detected Finger States:", fingerStates);
     return fingerCount;
   }, []);
 
@@ -65,18 +111,35 @@ export const useHandGesture = (isFrozen: boolean, enabled: boolean) => {
             }
 
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                const fingerCount = countFingers(results);
+                const rawCount = countFingers(results);
                 
-                if (results.multiHandLandmarks[0]) {
+                if (rawCount !== -1) {
+                    // Step 3: Add Stability Filter
+                    const maxFrameHistorySize = 5;
+                    frameHistoryRef.current.push(rawCount);
+                    if (frameHistoryRef.current.length > maxFrameHistorySize) {
+                        frameHistoryRef.current.shift();
+                    }
+                    
+                    const finalCount = mode(frameHistoryRef.current);
+                    
+                    console.log("Raw Landmarks Output:", results.multiHandLandmarks[0]);
+                    console.log("Final Count:", finalCount);
+                    
+                    if (results.multiHandLandmarks[0]) {
+                        drawLandmarks(ctx, results.multiHandLandmarks[0], canvas.width, canvas.height);
+                    }
+                    
+                    setGestureResult({
+                        fingerCount: finalCount,
+                        landmarks: results.multiHandLandmarks,
+                        isDetecting: true
+                    });
+                } else if (results.multiHandLandmarks[0]) {
                     drawLandmarks(ctx, results.multiHandLandmarks[0], canvas.width, canvas.height);
                 }
-                
-                setGestureResult({
-                    fingerCount,
-                    landmarks: results.multiHandLandmarks,
-                    isDetecting: true
-                });
             } else {
+                frameHistoryRef.current = [];
                 setGestureResult(prev => ({ ...prev, fingerCount: 0, isDetecting: false }));
             }
         }
